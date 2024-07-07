@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"math/rand"
 	"os"
 	"time"
 
@@ -16,10 +17,11 @@ import (
 const musicPath = "./musics"
 
 var (
-	pos     *Positioner
-	buffer  *beep.Buffer
-	volume  *effects.Volume
-	control *beep.Ctrl
+	pos              *Positioner
+	buffer           *beep.Buffer
+	volume           *effects.Volume
+	control          *beep.Ctrl
+	currentMusicName string
 )
 
 type Queue struct {
@@ -72,7 +74,8 @@ func (p *Positioner) Seek(pos int) {
 
 func playSong(musicQueue *Queue) {
 	music := musicQueue.Dequeue()
-	f, err := os.Open(musicPath + "/" + string(music))
+	currentMusicName = music
+	f, err := os.Open(string(music))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -103,10 +106,10 @@ func playSong(musicQueue *Queue) {
 		Silent:   false,
 	}
 	speaker.Play(volume)
-	termo(musicQueue)
+	cliRender(musicQueue)
 }
 
-func termo(musicQueue *Queue) {
+func cliRender(musicQueue *Queue) {
 	eventQueue := make(chan termbox.Event)
 	go func() {
 		for {
@@ -172,28 +175,6 @@ func termo(musicQueue *Queue) {
 	select {}
 }
 
-func main() {
-	musicQueue := Queue{}
-	files, err := os.ReadDir("./musics")
-	if err != nil {
-		log.Fatal(err)
-	}
-	for _, file := range files {
-		if !file.IsDir() {
-			musicQueue.Enqueue(file.Name())
-		}
-	}
-
-	err = termbox.Init()
-	if err != nil {
-		log.Fatalf("termbox.Init hata: %v", err)
-	}
-	defer termbox.Close()
-
-	playSong(&musicQueue)
-
-}
-
 func draw(pos *Positioner, buffer *beep.Buffer, volume *effects.Volume) {
 	termbox.Clear(termbox.ColorDefault, termbox.ColorDefault)
 	printVolume := 0.0
@@ -205,29 +186,84 @@ func draw(pos *Positioner, buffer *beep.Buffer, volume *effects.Volume) {
 	positionStr := fmt.Sprintf("Position: %dm%ds / %dm%ds", pos.Position/pos.Format.SampleRate.N(time.Minute), (pos.Position/pos.Format.SampleRate.N(time.Second))%60, buffer.Len()/pos.Format.SampleRate.N(time.Minute), (buffer.Len()/pos.Format.SampleRate.N(time.Second))%60)
 	volumeStr := fmt.Sprintf("Volume: %.1f", printVolume)
 	volumeUpDown := "Volume Up: ↑, Volume Down: ↓"
-	positionLeftRight := "Backward 10 sec: ← , Forward: → "
+	positionLeftRight := "Backward: ← , Forward: → "
 	pause := "Pause: Space"
 	exit := "Exit: Esc"
 
-	for i, c := range positionStr {
-		termbox.SetCell(i, 0, c, termbox.ColorDefault, termbox.ColorDefault)
-	}
-	for i, c := range volumeStr {
+	for i, c := range currentMusicName {
 		termbox.SetCell(i, 1, c, termbox.ColorDefault, termbox.ColorDefault)
 	}
-
-	for i, c := range volumeUpDown {
+	for i, c := range positionStr {
 		termbox.SetCell(i, 2, c, termbox.ColorDefault, termbox.ColorDefault)
 	}
-	for i, c := range positionLeftRight {
+	for i, c := range volumeStr {
 		termbox.SetCell(i, 3, c, termbox.ColorDefault, termbox.ColorDefault)
 	}
+	for i, c := range volumeUpDown {
+		termbox.SetCell(i, 6, c, termbox.ColorDefault, termbox.ColorDefault)
+	}
+	for i, c := range positionLeftRight {
+		termbox.SetCell(i, 7, c, termbox.ColorDefault, termbox.ColorDefault)
+	}
 	for i, c := range pause {
-		termbox.SetCell(i, 4, c, termbox.ColorDefault, termbox.ColorDefault)
+		termbox.SetCell(i, 8, c, termbox.ColorDefault, termbox.ColorDefault)
 	}
 	for i, c := range exit {
-		termbox.SetCell(i, 5, c, termbox.ColorDefault, termbox.ColorDefault)
+		termbox.SetCell(i, 9, c, termbox.ColorDefault, termbox.ColorDefault)
 	}
 
 	termbox.Flush()
+}
+
+func Shuffle(slice []string) {
+	rand.Seed(time.Now().UnixNano())
+	for i := len(slice) - 1; i > 0; i-- {
+		j := rand.Intn(i + 1)
+		slice[i], slice[j] = slice[j], slice[i]
+	}
+}
+
+func main() {
+	musicQueue := Queue{}
+
+	files, err := os.ReadDir(musicPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	musics := make([]string, 0, len(files))
+	for _, file := range files {
+		fileName := file.Name()
+		if file.IsDir() {
+			fileName += "/"
+		}
+		musics = append(musics, fileName)
+	}
+	Shuffle(musics)
+
+	for _, music := range musics {
+		if music[len(music)-1] != '/' {
+			musicQueue.Enqueue(musicPath + "/" + music)
+		} else {
+			// Bu bir dizin, içindeki dosyaları kuyruğa ekle
+			dirPath := musicPath + "/" + music // Dizin yolu
+			f, err := os.ReadDir(dirPath)
+			if err != nil {
+				log.Fatal(err)
+			}
+			for _, f1 := range f {
+				if !f1.IsDir() {
+					// Dizin içindeki dosyayı kuyruğa ekle
+					fullPath := dirPath + f1.Name() // Dosyanın tam yolu
+					fmt.Println(fullPath)
+					musicQueue.Enqueue(fullPath)
+				}
+			}
+		}
+	}
+	err = termbox.Init()
+	if err != nil {
+		log.Fatalf("termbox.Init hata: %v", err)
+	}
+	defer termbox.Close()
+	playSong(&musicQueue)
 }
