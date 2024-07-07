@@ -13,6 +13,32 @@ import (
 	"github.com/nsf/termbox-go"
 )
 
+const musicPath = "./musics"
+
+var (
+	pos     *Positioner
+	buffer  *beep.Buffer
+	volume  *effects.Volume
+	control *beep.Ctrl
+)
+
+type Queue struct {
+	items []string
+}
+
+func (q *Queue) Enqueue(item string) {
+	q.items = append(q.items, item)
+}
+
+func (q *Queue) Dequeue() string {
+	if len(q.items) == 0 {
+		return ""
+	}
+	item := q.items[0]
+	q.items = q.items[1:]
+	return item
+}
+
 type Volume struct {
 	Streamer beep.Streamer
 	Base     float64
@@ -44,15 +70,9 @@ func (p *Positioner) Seek(pos int) {
 	p.Position = pos
 }
 
-func main() {
-
-	err := termbox.Init()
-	if err != nil {
-		log.Fatalf("termbox.Init hata: %v", err)
-	}
-	defer termbox.Close()
-
-	f, err := os.Open("duality.mp3")
+func playSong(musicQueue *Queue) {
+	music := musicQueue.Dequeue()
+	f, err := os.Open(musicPath + "/" + string(music))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -64,26 +84,29 @@ func main() {
 	}
 	defer streamer.Close()
 
-	buffer := beep.NewBuffer(format)
+	buffer = beep.NewBuffer(format)
 	buffer.Append(streamer)
 
-	pos := &Positioner{
+	pos = &Positioner{
 		Streamer: buffer.Streamer(0, buffer.Len()),
 		Format:   format,
 		Buffer:   buffer,
 	}
 
 	speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10))
-	control := &beep.Ctrl{Streamer: pos, Paused: false}
+	control = &beep.Ctrl{Streamer: pos, Paused: false}
 	loopedStreamer := beep.Loop(1, control)
-	volume := &effects.Volume{
+	volume = &effects.Volume{
 		Streamer: loopedStreamer,
 		Base:     2,
 		Volume:   0,
 		Silent:   false,
 	}
 	speaker.Play(volume)
+	termo(musicQueue)
+}
 
+func termo(musicQueue *Queue) {
 	eventQueue := make(chan termbox.Event)
 	go func() {
 		for {
@@ -98,6 +121,11 @@ func main() {
 		for {
 			select {
 			case <-ticker.C:
+				if pos.Position >= buffer.Len() {
+					speaker.Clear()
+					playSong(musicQueue)
+					return
+				}
 				draw(pos, buffer, volume)
 			case ev := <-eventQueue:
 				if ev.Type == termbox.EventKey {
@@ -142,6 +170,28 @@ func main() {
 	}()
 
 	select {}
+}
+
+func main() {
+	musicQueue := Queue{}
+	files, err := os.ReadDir("./musics")
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, file := range files {
+		if !file.IsDir() {
+			musicQueue.Enqueue(file.Name())
+		}
+	}
+
+	err = termbox.Init()
+	if err != nil {
+		log.Fatalf("termbox.Init hata: %v", err)
+	}
+	defer termbox.Close()
+
+	playSong(&musicQueue)
+
 }
 
 func draw(pos *Positioner, buffer *beep.Buffer, volume *effects.Volume) {
