@@ -244,16 +244,16 @@ func main() {
 		if music[len(music)-1] != '/' {
 			musicQueue.Enqueue(musicPath + "/" + music)
 		} else {
-			// Bu bir dizin, içindeki dosyaları kuyruğa ekle
-			dirPath := musicPath + "/" + music // Dizin yolu
+
+			dirPath := musicPath + "/" + music
 			f, err := os.ReadDir(dirPath)
 			if err != nil {
 				log.Fatal(err)
 			}
 			for _, f1 := range f {
 				if !f1.IsDir() {
-					// Dizin içindeki dosyayı kuyruğa ekle
-					fullPath := dirPath + f1.Name() // Dosyanın tam yolu
+
+					fullPath := dirPath + f1.Name()
 					fmt.Println(fullPath)
 					musicQueue.Enqueue(fullPath)
 				}
