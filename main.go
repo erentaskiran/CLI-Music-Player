@@ -31,6 +31,8 @@ var (
 	selectedPlaylist int
 	prevMusicQueue   Queue
 	musicQueue       Queue
+	isPreLoading     bool
+	callPlaySong     bool
 )
 
 type Queue struct {
@@ -94,6 +96,7 @@ func preloadNextSong() {
 	if musicQueue.items == nil || len(musicQueue.items) == 0 {
 		return
 	}
+	isPreLoading = true
 	music := musicQueue.items[0]
 	f, err := os.Open(string(music))
 	if err != nil {
@@ -126,24 +129,39 @@ func preloadNextSong() {
 		Volume:   volumeValue,
 		Silent:   false,
 	}
+	isPreLoading = false
+	if callPlaySong {
+		callPlaySong = false
+		playSong(false)
+	}
+
 }
 
-func playSong() {
-	if nextBuffer != nil {
+func playSong(prevOrNext bool) { //if prev is true if next is false
+	if isPreLoading {
+		callPlaySong = true
+		return
+	}
+	if nextBuffer != nil && !prevOrNext {
+		speaker.Clear()
 		music := musicQueue.Dequeue()
 		prevMusicQueue.Enqueue(music)
 		buffer = nextBuffer
 		pos = nextPos
 		control = nextControl
 		volume = nextVolume
-		speaker.Play(volume)
+		format := buffer.Format()
 
 		nextBuffer = nil
 		nextPos = nil
 		nextControl = nil
 		nextVolume = nil
+		speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10))
+		speaker.Play(volume)
 		go preloadNextSong()
-		musicInfoRender()
+
+		go musicInfoRender()
+
 		return
 	}
 
@@ -184,9 +202,10 @@ func playSong() {
 		Silent:   false,
 	}
 	speaker.Play(volume)
-	go preloadNextSong()
-	musicInfoRender()
 
+	go preloadNextSong()
+
+	go musicInfoRender()
 }
 
 func musicInfoRender() {
@@ -209,7 +228,7 @@ func musicInfoRender() {
 						maintainWelcomePage(getPlaylists())
 						return
 					}
-					playSong()
+					playSong(false)
 				}
 				drawMusicInfo(pos, buffer, volume)
 			case ev := <-eventQueue:
@@ -254,7 +273,7 @@ func musicInfoRender() {
 					case termbox.KeyCtrlX:
 						if len(musicQueue.items) > 0 {
 							speaker.Clear()
-							playSong()
+							playSong(false)
 						}
 					case termbox.KeyCtrlZ:
 						if len(prevMusicQueue.items) > 0 {
@@ -267,7 +286,7 @@ func musicInfoRender() {
 
 							musicQueue.items = append(itemsToPrepend, musicQueue.items...)
 							speaker.Clear()
-							playSong()
+							playSong(true)
 						}
 
 					}
@@ -488,7 +507,7 @@ func maintainWelcomePage(playlists []string) {
 						}
 					case termbox.KeyEnter:
 						addMusicToQueue(playlists[selectedPlaylist])
-						playSong()
+						playSong(false)
 						ticker.Stop()
 						return
 					case termbox.KeyCtrlS:
