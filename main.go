@@ -26,6 +26,7 @@ var (
 	shuffle          bool
 	selectedPlaylist int
 	prevMusicQueue   Queue
+	musicQueue       Queue
 )
 
 type Queue struct {
@@ -85,7 +86,7 @@ func pathToMusicName(path string) string {
 	return ""
 }
 
-func playSong(musicQueue *Queue) {
+func playSong() {
 	music := musicQueue.Dequeue()
 	prevMusicQueue.Enqueue(music)
 	currentMusicName = pathToMusicName(music)
@@ -112,22 +113,23 @@ func playSong(musicQueue *Queue) {
 
 	speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10))
 	control = &beep.Ctrl{Streamer: pos, Paused: false}
-	loopedStreamer := beep.Loop(1, control)
 	volumeValue := 0.0
 	if volume != nil {
 		volumeValue = volume.Volume
 	}
 	volume = &effects.Volume{
-		Streamer: loopedStreamer,
+		Streamer: control,
 		Base:     2,
 		Volume:   volumeValue,
 		Silent:   false,
 	}
 	speaker.Play(volume)
-	cliRender(musicQueue)
+
+	musicInfoRender()
+
 }
 
-func cliRender(musicQueue *Queue) {
+func musicInfoRender() {
 	eventQueue := make(chan termbox.Event)
 	go func() {
 		for {
@@ -142,16 +144,14 @@ func cliRender(musicQueue *Queue) {
 		for {
 			select {
 			case <-ticker.C:
-				if pos.Position >= buffer.Len() {
-					speaker.Clear()
+				if buffer.Len()-pos.Position < pos.Format.SampleRate.N(time.Second*1) {
 					if musicQueue.items == nil || len(musicQueue.items) == 0 {
-						maintainWelcomePage(getPlaylists(), musicQueue)
+						maintainWelcomePage(getPlaylists())
 						return
 					}
-					playSong(musicQueue)
-					return
+					playSong()
 				}
-				drawMusicInfo(pos, buffer, volume, *musicQueue)
+				drawMusicInfo(pos, buffer, volume)
 			case ev := <-eventQueue:
 				if ev.Type == termbox.EventKey {
 					switch ev.Key {
@@ -189,11 +189,11 @@ func cliRender(musicQueue *Queue) {
 						volume.Volume -= 0.1
 					case termbox.KeyCtrlR:
 						speaker.Clear()
-						maintainWelcomePage(getPlaylists(), &Queue{})
+						maintainWelcomePage(getPlaylists())
 						return
 					case termbox.KeyCtrlX:
 						speaker.Clear()
-						playSong(musicQueue)
+						playSong()
 					case termbox.KeyCtrlZ:
 						if len(prevMusicQueue.items) > 0 {
 							var itemsToPrepend []string
@@ -205,7 +205,7 @@ func cliRender(musicQueue *Queue) {
 
 							musicQueue.items = append(itemsToPrepend, musicQueue.items...)
 							speaker.Clear()
-							playSong(musicQueue)
+							playSong()
 						}
 
 					}
@@ -218,7 +218,7 @@ func cliRender(musicQueue *Queue) {
 	select {}
 }
 
-func drawMusicInfo(pos *Positioner, buffer *beep.Buffer, volume *effects.Volume, musicQueue Queue) {
+func drawMusicInfo(pos *Positioner, buffer *beep.Buffer, volume *effects.Volume) {
 	termbox.Clear(termbox.ColorDefault, termbox.ColorDefault)
 	printVolume := 0.0
 	if volume.Volume > 0 {
@@ -298,7 +298,7 @@ func Shuffle(slice []string) {
 	}
 }
 
-func addMusicToQueue(musicQueue *Queue, playlist string) {
+func addMusicToQueue(playlist string) {
 	localMusicPath := musicPath + "/" + playlist
 	files, err := os.ReadDir(localMusicPath)
 	if err != nil {
@@ -316,13 +316,12 @@ func addMusicToQueue(musicQueue *Queue, playlist string) {
 		Shuffle(musics)
 	}
 	if len(musics) == 0 {
-		maintainWelcomePage(getPlaylists(), musicQueue)
+		maintainWelcomePage(getPlaylists())
 	}
 	for _, music := range musics {
 		if music[len(music)-1] != '/' {
 			musicQueue.Enqueue(localMusicPath + "/" + music)
 		} else {
-
 			dirPath := localMusicPath + "/" + music
 			f, err := os.ReadDir(dirPath)
 			if err != nil {
@@ -395,7 +394,7 @@ func getPlaylists() []string {
 	return playlists
 }
 
-func maintainWelcomePage(playlists []string, musicQueue *Queue) {
+func maintainWelcomePage(playlists []string) {
 	termbox.Clear(termbox.ColorDefault, termbox.ColorDefault)
 	termbox.Clear(termbox.ColorBlue, termbox.ColorDefault)
 	termbox.Flush()
@@ -426,8 +425,8 @@ func maintainWelcomePage(playlists []string, musicQueue *Queue) {
 							selectedPlaylist--
 						}
 					case termbox.KeyEnter:
-						addMusicToQueue(musicQueue, playlists[selectedPlaylist])
-						playSong(musicQueue)
+						addMusicToQueue(playlists[selectedPlaylist])
+						playSong()
 						ticker.Stop()
 						return
 					case termbox.KeyCtrlS:
@@ -436,7 +435,12 @@ func maintainWelcomePage(playlists []string, musicQueue *Queue) {
 						speaker.Clear()
 						os.Exit(0)
 						return
+					case termbox.KeyCtrlC:
+						speaker.Clear()
+						os.Exit(0)
+						return
 					}
+
 				}
 			}
 		}
@@ -451,12 +455,12 @@ func main() {
 		log.Fatalf("termbox.Init hata: %v", err)
 	}
 	defer termbox.Close()
-	musicQueue := Queue{}
+	musicQueue = Queue{}
 	prevMusicQueue = Queue{}
 	shuffle = false
 	selectedPlaylist = 0
 
 	playlists := getPlaylists()
 
-	maintainWelcomePage(playlists, &musicQueue)
+	maintainWelcomePage(playlists)
 }
