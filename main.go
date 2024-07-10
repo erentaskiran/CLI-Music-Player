@@ -25,6 +25,7 @@ var (
 	currentMusicName string
 	shuffle          bool
 	selectedPlaylist int
+	prevMusicQueue   Queue
 )
 
 type Queue struct {
@@ -86,7 +87,7 @@ func pathToMusicName(path string) string {
 
 func playSong(musicQueue *Queue) {
 	music := musicQueue.Dequeue()
-
+	prevMusicQueue.Enqueue(music)
 	currentMusicName = pathToMusicName(music)
 	f, err := os.Open(string(music))
 	if err != nil {
@@ -142,7 +143,7 @@ func cliRender(musicQueue *Queue) {
 					playSong(musicQueue)
 					return
 				}
-				draw(pos, buffer, volume, *musicQueue)
+				drawMusicInfo(pos, buffer, volume, *musicQueue)
 			case ev := <-eventQueue:
 				if ev.Type == termbox.EventKey {
 					switch ev.Key {
@@ -180,8 +181,29 @@ func cliRender(musicQueue *Queue) {
 						volume.Volume -= 0.1
 					case termbox.KeyCtrlR:
 						speaker.Clear()
-						maintainWelcomePage(getPlaylists(), musicQueue)
+						maintainWelcomePage(getPlaylists(), &Queue{})
 						return
+					case termbox.KeyCtrlX:
+						speaker.Clear()
+						playSong(musicQueue)
+					case termbox.KeyCtrlZ:
+						if len(prevMusicQueue.items) > 0 {
+							// this part needs to be refactore this is so slow maybe change data structure to double linked list
+							newQueue := Queue{}
+							if pos.Position < pos.Format.SampleRate.N(time.Second*10) {
+								newQueue.Enqueue(prevMusicQueue.items[len(prevMusicQueue.items)-2])
+								newQueue.Enqueue(prevMusicQueue.items[len(prevMusicQueue.items)-1])
+							} else {
+								newQueue.Enqueue(prevMusicQueue.items[len(prevMusicQueue.items)-1])
+							}
+							for i := 0; i < len(musicQueue.items); i++ {
+								newQueue.Enqueue(musicQueue.items[i])
+							}
+							musicQueue = &newQueue
+							speaker.Clear()
+							playSong(musicQueue)
+						}
+
 					}
 
 				}
@@ -192,7 +214,7 @@ func cliRender(musicQueue *Queue) {
 	select {}
 }
 
-func draw(pos *Positioner, buffer *beep.Buffer, volume *effects.Volume, musicQueue Queue) {
+func drawMusicInfo(pos *Positioner, buffer *beep.Buffer, volume *effects.Volume, musicQueue Queue) {
 	termbox.Clear(termbox.ColorDefault, termbox.ColorDefault)
 	termbox.Clear(termbox.ColorBlue, termbox.ColorDefault)
 	termbox.Flush()
@@ -204,6 +226,7 @@ func draw(pos *Positioner, buffer *beep.Buffer, volume *effects.Volume, musicQue
 	}
 	positionStr := fmt.Sprintf("Position: %dm%ds / %dm%ds", pos.Position/pos.Format.SampleRate.N(time.Minute), (pos.Position/pos.Format.SampleRate.N(time.Second))%60, buffer.Len()/pos.Format.SampleRate.N(time.Minute), (buffer.Len()/pos.Format.SampleRate.N(time.Second))%60)
 	volumeStr := fmt.Sprintf("Volume: %.1f", printVolume)
+	prevOrNext := "Prev: Ctrl+Z, Next: Ctrl+X"
 	volumeUpDown := "Volume Up: ↑, Volume Down: ↓"
 	positionLeftRight := "Backward: ← , Forward: → "
 	pause := "Pause: Space"
@@ -213,37 +236,40 @@ func draw(pos *Positioner, buffer *beep.Buffer, volume *effects.Volume, musicQue
 	nextMusics := "Next Musics: "
 
 	for i, c := range currentMusicName {
-		termbox.SetCell(i, 1, c, termbox.ColorDefault, termbox.ColorDefault)
+		termbox.SetCell(5+i, 1, c, termbox.ColorDefault, termbox.ColorDefault)
 	}
 	for i, c := range positionStr {
-		termbox.SetCell(i, 2, c, termbox.ColorDefault, termbox.ColorDefault)
+		termbox.SetCell(5+i, 2, c, termbox.ColorDefault, termbox.ColorDefault)
 	}
 	for i, c := range volumeStr {
-		termbox.SetCell(i, 3, c, termbox.ColorDefault, termbox.ColorDefault)
+		termbox.SetCell(5+i, 3, c, termbox.ColorDefault, termbox.ColorDefault)
+	}
+	for i, c := range prevOrNext {
+		termbox.SetCell(5+i, 5, c, termbox.ColorDefault, termbox.ColorDefault)
 	}
 	for i, c := range volumeUpDown {
-		termbox.SetCell(i, 6, c, termbox.ColorDefault, termbox.ColorDefault)
+		termbox.SetCell(5+i, 6, c, termbox.ColorDefault, termbox.ColorDefault)
 	}
 	for i, c := range positionLeftRight {
-		termbox.SetCell(i, 7, c, termbox.ColorDefault, termbox.ColorDefault)
+		termbox.SetCell(5+i, 7, c, termbox.ColorDefault, termbox.ColorDefault)
 	}
 	for i, c := range pause {
-		termbox.SetCell(i, 8, c, termbox.ColorDefault, termbox.ColorDefault)
+		termbox.SetCell(5+i, 8, c, termbox.ColorDefault, termbox.ColorDefault)
 	}
 	for i, c := range mainPage {
-		termbox.SetCell(i, 9, c, termbox.ColorDefault, termbox.ColorDefault)
+		termbox.SetCell(5+i, 9, c, termbox.ColorDefault, termbox.ColorDefault)
 	}
 	for i, c := range exit {
-		termbox.SetCell(i, 10, c, termbox.ColorDefault, termbox.ColorDefault)
+		termbox.SetCell(5+i, 10, c, termbox.ColorDefault, termbox.ColorDefault)
 	}
 	for i, c := range nextMusics {
-		termbox.SetCell(i, 12, c, termbox.ColorDefault, termbox.ColorDefault)
+		termbox.SetCell(5+i, 12, c, termbox.ColorDefault, termbox.ColorDefault)
 	}
 	for i, k := range musicQueue.items {
 		if i < 5 {
 			k = pathToMusicName(k)
 			for j, c := range k {
-				termbox.SetCell(j, 13+i, c, termbox.ColorDefault, termbox.ColorDefault)
+				termbox.SetCell(5+j, 13+i, c, termbox.ColorDefault, termbox.ColorDefault)
 			}
 		}
 	}
@@ -259,8 +285,9 @@ func Shuffle(slice []string) {
 	}
 }
 
-func addMusicToQueue(musicQueue *Queue) {
-	files, err := os.ReadDir(musicPath)
+func addMusicToQueue(musicQueue *Queue, playlist string) {
+	localMusicPath := musicPath + "/" + playlist
+	files, err := os.ReadDir(localMusicPath)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -275,12 +302,15 @@ func addMusicToQueue(musicQueue *Queue) {
 	if shuffle {
 		Shuffle(musics)
 	}
+	if len(musics) == 0 {
+		maintainWelcomePage(getPlaylists(), musicQueue)
+	}
 	for _, music := range musics {
 		if music[len(music)-1] != '/' {
-			musicQueue.Enqueue(musicPath + "/" + music)
+			musicQueue.Enqueue(localMusicPath + "/" + music)
 		} else {
 
-			dirPath := musicPath + "/" + music
+			dirPath := localMusicPath + "/" + music
 			f, err := os.ReadDir(dirPath)
 			if err != nil {
 				log.Fatal(err)
@@ -307,28 +337,29 @@ func drawWelcomePage(playlists []string, selectedPlaylist int) {
 	shuffleInfo := "Press Ctrl+S to shuffle. Shuffle:" + strconv.FormatBool(shuffle)
 
 	for i, c := range welcome {
-		termbox.SetCell(i, 1, c, termbox.ColorDefault, termbox.ColorDefault)
+		termbox.SetCell(5+i, 1, c, termbox.ColorDefault, termbox.ColorDefault)
 	}
 	for i, c := range pressEnter {
-		termbox.SetCell(i, 2, c, termbox.ColorDefault, termbox.ColorDefault)
+		termbox.SetCell(5+i, 2, c, termbox.ColorDefault, termbox.ColorDefault)
 	}
 	for i, c := range shuffleInfo {
-		termbox.SetCell(i, 3, c, termbox.ColorDefault, termbox.ColorDefault)
+		termbox.SetCell(5+i, 3, c, termbox.ColorDefault, termbox.ColorDefault)
 	}
 	for i, c := range exitInfo {
-		termbox.SetCell(i, 4, c, termbox.ColorDefault, termbox.ColorDefault)
+		termbox.SetCell(5+i, 4, c, termbox.ColorDefault, termbox.ColorDefault)
 	}
 	for i, c := range playlistsInfo {
-		termbox.SetCell(i, 5, c, termbox.ColorDefault, termbox.ColorDefault)
+		termbox.SetCell(5+i, 7, c, termbox.ColorDefault, termbox.ColorDefault)
 	}
 	for i, playlist := range playlists {
 		if selectedPlaylist == i {
+			playlist += " <-"
 			for j, c := range playlist {
-				termbox.SetCell(j, 6+i, c, termbox.ColorBlue, termbox.ColorDefault)
+				termbox.SetCell(5+j, 8+i, c, termbox.ColorBlue, termbox.ColorDefault)
 			}
 		} else {
 			for j, c := range playlist {
-				termbox.SetCell(j, 6+i, c, termbox.ColorDefault, termbox.ColorDefault)
+				termbox.SetCell(5+j, 8+i, c, termbox.ColorDefault, termbox.ColorDefault)
 			}
 		}
 
@@ -379,7 +410,7 @@ func maintainWelcomePage(playlists []string, musicQueue *Queue) {
 							selectedPlaylist--
 						}
 					case termbox.KeyEnter:
-						addMusicToQueue(musicQueue)
+						addMusicToQueue(musicQueue, playlists[selectedPlaylist])
 						playSong(musicQueue)
 						ticker.Stop()
 						return
@@ -405,6 +436,7 @@ func main() {
 	}
 	defer termbox.Close()
 	musicQueue := Queue{}
+	prevMusicQueue = Queue{}
 	shuffle = false
 	selectedPlaylist = 0
 
