@@ -235,6 +235,9 @@ func drawMusicInfo(pos *Positioner, buffer *beep.Buffer, volume *effects.Volume,
 
 	nextMusics := "Next Musics: "
 
+	musicBarLength := 60
+	currBarLength := int(float64(musicBarLength) * (float64(pos.Position) / float64(buffer.Len())))
+
 	for i, c := range currentMusicName {
 		termbox.SetCell(5+i, 1, c, termbox.ColorDefault, termbox.ColorDefault)
 	}
@@ -244,6 +247,14 @@ func drawMusicInfo(pos *Positioner, buffer *beep.Buffer, volume *effects.Volume,
 	for i, c := range volumeStr {
 		termbox.SetCell(5+i, 3, c, termbox.ColorDefault, termbox.ColorDefault)
 	}
+	termbox.SetCell(5, 4, '[', termbox.ColorDefault, termbox.ColorDefault)
+	for i := 0; i < currBarLength; i++ {
+		termbox.SetCell(6+i, 4, '-', termbox.ColorGreen, termbox.ColorGreen)
+	}
+	for i := currBarLength; i < musicBarLength; i++ {
+		termbox.SetCell(6+i, 4, '-', termbox.ColorDefault, termbox.ColorDefault)
+	}
+	termbox.SetCell(5+musicBarLength, 4, ']', termbox.ColorDefault, termbox.ColorDefault)
 	for i, c := range prevOrNext {
 		termbox.SetCell(5+i, 5, c, termbox.ColorDefault, termbox.ColorDefault)
 	}
