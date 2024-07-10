@@ -113,10 +113,14 @@ func playSong(musicQueue *Queue) {
 	speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10))
 	control = &beep.Ctrl{Streamer: pos, Paused: false}
 	loopedStreamer := beep.Loop(1, control)
+	volumeValue := 0.0
+	if volume != nil {
+		volumeValue = volume.Volume
+	}
 	volume = &effects.Volume{
 		Streamer: loopedStreamer,
 		Base:     2,
-		Volume:   0,
+		Volume:   volumeValue,
 		Silent:   false,
 	}
 	speaker.Play(volume)
@@ -140,6 +144,10 @@ func cliRender(musicQueue *Queue) {
 			case <-ticker.C:
 				if pos.Position >= buffer.Len() {
 					speaker.Clear()
+					if musicQueue.items == nil || len(musicQueue.items) == 0 {
+						maintainWelcomePage(getPlaylists(), musicQueue)
+						return
+					}
 					playSong(musicQueue)
 					return
 				}
@@ -188,18 +196,14 @@ func cliRender(musicQueue *Queue) {
 						playSong(musicQueue)
 					case termbox.KeyCtrlZ:
 						if len(prevMusicQueue.items) > 0 {
-							// this part needs to be refactore this is so slow maybe change data structure to double linked list
-							newQueue := Queue{}
+							var itemsToPrepend []string
 							if pos.Position < pos.Format.SampleRate.N(time.Second*10) {
-								newQueue.Enqueue(prevMusicQueue.items[len(prevMusicQueue.items)-2])
-								newQueue.Enqueue(prevMusicQueue.items[len(prevMusicQueue.items)-1])
+								itemsToPrepend = prevMusicQueue.items[len(prevMusicQueue.items)-2:]
 							} else {
-								newQueue.Enqueue(prevMusicQueue.items[len(prevMusicQueue.items)-1])
+								itemsToPrepend = prevMusicQueue.items[len(prevMusicQueue.items)-1:]
 							}
-							for i := 0; i < len(musicQueue.items); i++ {
-								newQueue.Enqueue(musicQueue.items[i])
-							}
-							musicQueue = &newQueue
+
+							musicQueue.items = append(itemsToPrepend, musicQueue.items...)
 							speaker.Clear()
 							playSong(musicQueue)
 						}
@@ -216,8 +220,6 @@ func cliRender(musicQueue *Queue) {
 
 func drawMusicInfo(pos *Positioner, buffer *beep.Buffer, volume *effects.Volume, musicQueue Queue) {
 	termbox.Clear(termbox.ColorDefault, termbox.ColorDefault)
-	termbox.Clear(termbox.ColorBlue, termbox.ColorDefault)
-	termbox.Flush()
 	printVolume := 0.0
 	if volume.Volume > 0 {
 		printVolume = float64(volume.Volume*25) + 50
@@ -249,10 +251,10 @@ func drawMusicInfo(pos *Positioner, buffer *beep.Buffer, volume *effects.Volume,
 	}
 	termbox.SetCell(5, 4, '[', termbox.ColorDefault, termbox.ColorDefault)
 	for i := 0; i < currBarLength; i++ {
-		termbox.SetCell(6+i, 4, '-', termbox.ColorGreen, termbox.ColorGreen)
+		termbox.SetCell(6+i, 4, '•', termbox.ColorGreen, termbox.ColorDefault)
 	}
 	for i := currBarLength; i < musicBarLength; i++ {
-		termbox.SetCell(6+i, 4, '-', termbox.ColorDefault, termbox.ColorDefault)
+		termbox.SetCell(6+i, 4, '•', termbox.ColorDefault, termbox.ColorDefault)
 	}
 	termbox.SetCell(5+musicBarLength, 4, ']', termbox.ColorDefault, termbox.ColorDefault)
 	for i, c := range prevOrNext {
@@ -340,9 +342,9 @@ func addMusicToQueue(musicQueue *Queue, playlist string) {
 func drawWelcomePage(playlists []string, selectedPlaylist int) {
 	termbox.Clear(termbox.ColorDefault, termbox.ColorDefault)
 	termbox.Clear(termbox.ColorBlue, termbox.ColorDefault)
-	termbox.Flush()
 	welcome := "Welcome to Music Player"
 	pressEnter := "Press Enter to start"
+	upDown := "Use Up and Down arrows to select playlist"
 	exitInfo := "Press Esc to exit"
 	playlistsInfo := "Playlists: "
 	shuffleInfo := "Press Ctrl+S to shuffle. Shuffle:" + strconv.FormatBool(shuffle)
@@ -358,6 +360,9 @@ func drawWelcomePage(playlists []string, selectedPlaylist int) {
 	}
 	for i, c := range exitInfo {
 		termbox.SetCell(5+i, 4, c, termbox.ColorDefault, termbox.ColorDefault)
+	}
+	for i, c := range upDown {
+		termbox.SetCell(5+i, 5, c, termbox.ColorDefault, termbox.ColorDefault)
 	}
 	for i, c := range playlistsInfo {
 		termbox.SetCell(5+i, 7, c, termbox.ColorDefault, termbox.ColorDefault)
