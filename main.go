@@ -19,9 +19,13 @@ const musicPath = "./musics"
 
 var (
 	pos              *Positioner
+	nextPos          *Positioner
 	buffer           *beep.Buffer
+	nextBuffer       *beep.Buffer
 	volume           *effects.Volume
+	nextVolume       *effects.Volume
 	control          *beep.Ctrl
+	nextControl      *beep.Ctrl
 	currentMusicName string
 	shuffle          bool
 	selectedPlaylist int
@@ -86,7 +90,63 @@ func pathToMusicName(path string) string {
 	return ""
 }
 
+func preloadNextSong() {
+	if musicQueue.items == nil || len(musicQueue.items) == 0 {
+		return
+	}
+	music := musicQueue.items[0]
+	f, err := os.Open(string(music))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer f.Close()
+
+	streamer2, nextFormat, err := mp3.Decode(f)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer streamer2.Close()
+
+	nextBuffer = beep.NewBuffer(nextFormat)
+	nextBuffer.Append(streamer2)
+
+	nextPos = &Positioner{
+		Streamer: nextBuffer.Streamer(0, nextBuffer.Len()),
+		Format:   nextFormat,
+		Buffer:   nextBuffer,
+	}
+	nextControl := &beep.Ctrl{Streamer: nextPos, Paused: false}
+	volumeValue := 0.0
+	if volume != nil {
+		volumeValue = volume.Volume
+	}
+	nextVolume = &effects.Volume{
+		Streamer: nextControl,
+		Base:     2,
+		Volume:   volumeValue,
+		Silent:   false,
+	}
+}
+
 func playSong() {
+	if nextBuffer != nil {
+		music := musicQueue.Dequeue()
+		prevMusicQueue.Enqueue(music)
+		buffer = nextBuffer
+		pos = nextPos
+		control = nextControl
+		volume = nextVolume
+		speaker.Play(volume)
+
+		nextBuffer = nil
+		nextPos = nil
+		nextControl = nil
+		nextVolume = nil
+		go preloadNextSong()
+		musicInfoRender()
+		return
+	}
+
 	music := musicQueue.Dequeue()
 	prevMusicQueue.Enqueue(music)
 	currentMusicName = pathToMusicName(music)
@@ -124,7 +184,7 @@ func playSong() {
 		Silent:   false,
 	}
 	speaker.Play(volume)
-
+	go preloadNextSong()
 	musicInfoRender()
 
 }
@@ -192,8 +252,10 @@ func musicInfoRender() {
 						maintainWelcomePage(getPlaylists())
 						return
 					case termbox.KeyCtrlX:
-						speaker.Clear()
-						playSong()
+						if len(musicQueue.items) > 0 {
+							speaker.Clear()
+							playSong()
+						}
 					case termbox.KeyCtrlZ:
 						if len(prevMusicQueue.items) > 0 {
 							var itemsToPrepend []string
