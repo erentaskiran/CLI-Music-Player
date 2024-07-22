@@ -18,21 +18,27 @@ import (
 const musicPath = "./musics"
 
 var (
-	pos *Positioner
-	// nextPos          *Positioner
-	buffer *beep.Buffer
-	// nextBuffer       *beep.Buffer
-	volume *effects.Volume
-	// nextVolume       *effects.Volume
-	control *beep.Ctrl
-	// nextControl      *beep.Ctrl
-	currentMusicName string
-	shuffle          bool
-	selectedPlaylist int
-	prevMusicQueue   Queue
-	musicQueue       Queue
-	// isPreLoading     bool
-	// callPlaySong     bool
+	pos                  *Positioner
+	nextPos              *Positioner
+	prevPos              *Positioner
+	buffer               *beep.Buffer
+	nextBuffer           *beep.Buffer
+	prevBuffer           *beep.Buffer
+	volume               *effects.Volume
+	nextVolume           *effects.Volume
+	prevVolume           *effects.Volume
+	control              *beep.Ctrl
+	nextControl          *beep.Ctrl
+	prevControl          *beep.Ctrl
+	currentMusicName     string
+	shuffle              bool
+	selectedPlaylist     int
+	prevMusicQueue       Queue
+	musicQueue           Queue
+	isPreLoadingNextSong bool
+	isPreLoadingPrevSong bool
+	callPlaySong         bool
+	pause                bool
 )
 
 type Queue struct {
@@ -49,6 +55,15 @@ func (q *Queue) Dequeue() string {
 	}
 	item := q.items[0]
 	q.items = q.items[1:]
+	return item
+}
+
+func (q *Queue) takeLast() string {
+	if len(q.items) == 0 {
+		return ""
+	}
+	item := q.items[len(q.items)-1]
+	q.items = q.items[:len(q.items)-1]
 	return item
 }
 
@@ -96,120 +111,161 @@ func pathToMusicName(path string) string {
 	return ""
 }
 
-// func preloadNextSong() {
-// 	if musicQueue.items == nil || len(musicQueue.items) == 0 {
-// 		return
-// 	}
-// 	isPreLoading = true
-// 	music := musicQueue.Dequeue()
-// 	prevMusicQueue.AddFirst(music)
-// 	f, err := os.Open(string(music))
-// 	if err != nil {
-// 		log.Fatal(err)
-// 	}
-// 	defer f.Close()
-
-// 	streamer2, nextFormat, err := mp3.Decode(f)
-// 	if err != nil {
-// 		log.Fatal(err)
-// 	}
-// 	defer streamer2.Close()
-
-// 	nextBuffer = beep.NewBuffer(nextFormat)
-// 	nextBuffer.Append(streamer2)
-
-// 	nextPos = &Positioner{
-// 		Streamer: nextBuffer.Streamer(0, nextBuffer.Len()),
-// 		Format:   nextFormat,
-// 		Buffer:   nextBuffer,
-// 	}
-// 	nextControl := &beep.Ctrl{Streamer: nextPos, Paused: false}
-// 	volumeValue := 0.0
-// 	if volume != nil {
-// 		volumeValue = volume.Volume
-// 	}
-// 	nextVolume = &effects.Volume{
-// 		Streamer: nextControl,
-// 		Base:     2,
-// 		Volume:   volumeValue,
-// 		Silent:   false,
-// 	}
-// 	isPreLoading = false
-// 	if callPlaySong {
-// 		callPlaySong = false
-// 		playSong(false)
-// 	}
-
-// }
-
-func playSong(prevOrNext bool) { //if prev is true if next is false
-	// if isPreLoading || callPlaySong {
-	// 	callPlaySong = true
-	// 	return
-	// }
-	// if nextBuffer != nil && !prevOrNext {
-	// 	speaker.Clear()
-
-	// 	buffer = nextBuffer
-	// 	pos = nextPos
-	// 	control = nextControl
-	// 	volume = nextVolume
-	// 	format := nextBuffer.Format()
-
-	// 	nextBuffer = nil
-	// 	nextPos = nil
-	// 	nextControl = nil
-	// 	nextVolume = nil
-	// 	speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10))
-	// 	speaker.Play(volume)
-	// 	go preloadNextSong()
-
-	// 	musicInfoRender()
-
-	// 	return
-	// }
-
-	music := musicQueue.Dequeue()
-	prevMusicQueue.AddFirst(music)
-	currentMusicName = pathToMusicName(music)
+func preloadNextSong(prevOrNext bool) {
+	if prevMusicQueue.items == nil || len(prevMusicQueue.items) == 0 {
+		return
+	}
+	isPreLoadingNextSong = true
+	music := prevMusicQueue.items[len(prevMusicQueue.items)-1]
 	f, err := os.Open(string(music))
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer f.Close()
 
-	streamer, format, err := mp3.Decode(f)
+	streamer2, nextFormat, err := mp3.Decode(f)
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer streamer.Close()
+	defer streamer2.Close()
 
-	buffer = beep.NewBuffer(format)
-	buffer.Append(streamer)
+	nextBuffer = beep.NewBuffer(nextFormat)
+	nextBuffer.Append(streamer2)
 
-	pos = &Positioner{
-		Streamer: buffer.Streamer(0, buffer.Len()),
-		Format:   format,
-		Buffer:   buffer,
+	nextPos = &Positioner{
+		Streamer: nextBuffer.Streamer(0, nextBuffer.Len()),
+		Format:   nextFormat,
+		Buffer:   nextBuffer,
 	}
-
-	speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10))
-	control = &beep.Ctrl{Streamer: pos, Paused: false}
+	nextControl = &beep.Ctrl{Streamer: nextPos, Paused: pause}
 	volumeValue := 0.0
 	if volume != nil {
 		volumeValue = volume.Volume
 	}
-	volume = &effects.Volume{
-		Streamer: control,
+	nextVolume = &effects.Volume{
+		Streamer: nextControl,
 		Base:     2,
 		Volume:   volumeValue,
 		Silent:   false,
 	}
-	speaker.Play(volume)
+	isPreLoadingNextSong = false
+	if callPlaySong && !prevOrNext {
+		callPlaySong = false
 
-	// go preloadNextSong()
+		playSong(false)
+	}
 
-	musicInfoRender()
+}
+
+func preloadPrevSong(prevOrNext bool) {
+	if prevMusicQueue.items == nil || len(prevMusicQueue.items) == 0 {
+		return
+	}
+	if prevBuffer != nil {
+		return
+	}
+	isPreLoadingPrevSong = true
+	music := prevMusicQueue.items[0]
+	f, err := os.Open(string(music))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer f.Close()
+
+	streamer2, prevFormat, err := mp3.Decode(f)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer streamer2.Close()
+
+	prevBuffer = beep.NewBuffer(prevFormat)
+	prevBuffer.Append(streamer2)
+
+	prevPos = &Positioner{
+		Streamer: prevBuffer.Streamer(0, prevBuffer.Len()),
+		Format:   prevFormat,
+		Buffer:   prevBuffer,
+	}
+	prevControl = &beep.Ctrl{Streamer: prevPos, Paused: false}
+	volumeValue := 0.0
+	if volume != nil {
+		volumeValue = volume.Volume
+	}
+	prevVolume = &effects.Volume{
+		Streamer: prevControl,
+		Base:     2,
+		Volume:   volumeValue,
+		Silent:   false,
+	}
+	isPreLoadingPrevSong = false
+	if callPlaySong && prevOrNext {
+		callPlaySong = false
+		playSong(true)
+	}
+
+}
+
+func playSong(prevOrNext bool) { //if prev is true if next is false
+	if buffer == nil && nextBuffer == nil {
+		callPlaySong = true
+		pause = false
+		fmt.Println("buffer is nil")
+		go preloadNextSong(prevOrNext)
+		go preloadPrevSong(prevOrNext)
+		return
+	}
+	if (isPreLoadingNextSong && !prevOrNext) || (isPreLoadingPrevSong && prevOrNext) || callPlaySong {
+		fmt.Println("preloading")
+		callPlaySong = true
+		return
+	}
+	if nextBuffer != nil && !prevOrNext {
+		fmt.Println("next buffer is not nil")
+		music := musicQueue.Dequeue()
+		prevMusicQueue.Enqueue(music)
+		currentMusicName = pathToMusicName(music)
+		speaker.Clear()
+		buffer = nextBuffer
+		pos = nextPos
+		control = nextControl
+		volume = nextVolume
+		format := nextBuffer.Format()
+
+		nextBuffer = nil
+		nextPos = nil
+		nextControl = nil
+		nextVolume = nil
+		speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10))
+		speaker.Play(volume)
+		go preloadNextSong(prevOrNext)
+		go preloadPrevSong(prevOrNext)
+		musicInfoRender()
+
+		return
+	}
+	if prevBuffer != nil && prevOrNext {
+		fmt.Println("prev buffer is not nil")
+		music := prevMusicQueue.takeLast()
+		musicQueue.AddFirst(music)
+		currentMusicName = pathToMusicName(music)
+		speaker.Clear()
+		buffer = prevBuffer
+		pos = prevPos
+		control = prevControl
+		volume = prevVolume
+		format := prevBuffer.Format()
+
+		prevBuffer = nil
+		prevPos = nil
+		prevControl = nil
+		prevVolume = nil
+		speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10))
+		speaker.Play(volume)
+		go preloadNextSong(prevOrNext)
+		go preloadPrevSong(prevOrNext)
+		musicInfoRender()
+		return
+	}
 }
 
 func musicInfoRender() {
@@ -281,10 +337,9 @@ func musicInfoRender() {
 						}
 					case termbox.KeyCtrlZ:
 						if len(prevMusicQueue.items) > 0 {
-
-							musicQueue.AddFirst(prevMusicQueue.Dequeue())
-							musicQueue.AddFirst(prevMusicQueue.Dequeue())
-
+							if pos.Position < pos.Format.SampleRate.N(time.Second*5) {
+								musicQueue.AddFirst(prevMusicQueue.takeLast())
+							}
 							speaker.Clear()
 							playSong(true)
 						}
