@@ -209,18 +209,18 @@ func playSong(prevOrNext bool) { //if prev is true if next is false
 	if buffer == nil && nextBuffer == nil {
 		callPlaySong = true
 		pause = false
-		fmt.Println("buffer is nil")
+
 		go preloadNextSong(prevOrNext)
 		go preloadPrevSong(prevOrNext)
 		return
 	}
 	if (isPreLoadingNextSong && !prevOrNext) || (isPreLoadingPrevSong && prevOrNext) || callPlaySong {
-		fmt.Println("preloading")
+
 		callPlaySong = true
 		return
 	}
 	if nextBuffer != nil && !prevOrNext {
-		fmt.Println("next buffer is not nil")
+
 		music := musicQueue.Dequeue()
 		prevMusicQueue.Enqueue(music)
 		currentMusicName = pathToMusicName(music)
@@ -244,7 +244,7 @@ func playSong(prevOrNext bool) { //if prev is true if next is false
 		return
 	}
 	if prevBuffer != nil && prevOrNext {
-		fmt.Println("prev buffer is not nil")
+
 		music := prevMusicQueue.takeLast()
 		musicQueue.AddFirst(music)
 		currentMusicName = pathToMusicName(music)
